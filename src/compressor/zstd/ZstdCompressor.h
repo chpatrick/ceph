@@ -39,7 +39,7 @@ class ZstdCompressor : public Compressor {
     std::unique_ptr<ZSTD_CStream, decltype(&ZSTD_freeCStream)> s_guard(
       s, &ZSTD_freeCStream);
 
-    size_t res = ZSTD_initCStream_srcSize(s, cct->_conf->compressor_zstd_level, src.length());
+    size_t const res = ZSTD_initCStream_srcSize(s, cct->_conf->compressor_zstd_level, src.length());
     if (ZSTD_isError(res)) {
       return -EINVAL;
     }
@@ -131,7 +131,7 @@ class ZstdCompressor : public Compressor {
     std::unique_ptr<ZSTD_DStream, decltype(&ZSTD_freeDStream)> s_guard(
       s, &ZSTD_freeDStream);
 
-    size_t init_res = ZSTD_initDStream(s);
+    size_t const init_res = ZSTD_initDStream(s);
     if (ZSTD_isError(init_res)) {
       return -EINVAL;
     }
@@ -157,8 +157,8 @@ class ZstdCompressor : public Compressor {
       // size); looping on inbuf.pos ensures we don't silently drop the
       // remaining bytes of the chunk.
       while (inbuf.pos < inbuf.size) {
-        size_t prev_in_pos = inbuf.pos;
-        size_t prev_out_pos = outbuf.pos;
+        size_t const prev_in_pos = inbuf.pos;
+        size_t const prev_out_pos = outbuf.pos;
         r = ZSTD_decompressStream(s, &outbuf, &inbuf);
         if (ZSTD_isError(r)) {
           // Corrupt input, etc.
