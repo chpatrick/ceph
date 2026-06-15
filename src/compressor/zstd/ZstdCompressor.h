@@ -56,6 +56,9 @@ class ZstdCompressor : public Compressor {
     outbuf.size = outptr.length();
     outbuf.pos = 0;
 
+    // Tracks the most recent ZSTD_compressStream2 return value. After the final
+    // ZSTD_e_end flush, 0 means the frame was fully completed and flushed.
+    size_t r = 0;
     while (left) {
       ceph_assert(!p.end());
       struct ZSTD_inBuffer_s inbuf;
@@ -63,12 +66,27 @@ class ZstdCompressor : public Compressor {
       inbuf.size = p.get_ptr_and_advance(left, (const char**)&inbuf.src);
       left -= inbuf.size;
       ZSTD_EndDirective const zed = (left==0) ? ZSTD_e_end : ZSTD_e_continue;
-      size_t r = ZSTD_compressStream2(s.get(), &outbuf, &inbuf, zed);
-      if (ZSTD_isError(r)) {
-	      return -EINVAL;
-      }
+      // ZSTD_compressStream2 may not consume the whole input chunk in one call,
+      // and for ZSTD_e_end it must be called repeatedly until it returns 0 to
+      // fully flush the frame epilogue. Loop until the chunk is consumed and,
+      // on the final chunk, until the frame is flushed.
+      // ZSTD_compressStream2 is guaranteed to make forward progress (and in the
+      // default nbWorkers==0 mode it completes its job before returning), so
+      // this loop always terminates. See zstd's streaming_compression.c example.
+      do {
+        r = ZSTD_compressStream2(s.get(), &outbuf, &inbuf, zed);
+        if (ZSTD_isError(r)) {
+          return -EINVAL;
+        }
+      } while (inbuf.pos < inbuf.size || (zed == ZSTD_e_end && r != 0));
     }
     ceph_assert(p.end());
+
+    // The final ZSTD_e_end call must have returned 0, i.e. the frame epilogue
+    // was fully flushed. Otherwise we'd emit a truncated, undecodable frame.
+    if (r != 0) {
+      return -EINVAL;
+    }
 
     // prefix with decompressed length
     ceph::encode((uint32_t)src.length(), dst);
