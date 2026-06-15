@@ -47,6 +47,9 @@ class ZstdCompressor : public Compressor {
     size_t left = src.length();
 
     size_t const out_max = ZSTD_compressBound(left);
+    if (ZSTD_isError(out_max)) {
+      return -EINVAL;
+    }
     ceph::buffer::ptr outptr = ceph::buffer::create_small_page_aligned(out_max);
     ZSTD_outBuffer_s outbuf;
     outbuf.dst = outptr.c_str();
