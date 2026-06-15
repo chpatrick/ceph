@@ -87,21 +87,6 @@ class ZstdCompressor : public Compressor {
     uint32_t dst_len;
     ceph::decode(dst_len, p);
 
-    // Bound-check the (untrusted) decompressed-length prefix before allocating
-    // a buffer of that size. A corrupt prefix (e.g. 0xffffffff) would otherwise
-    // request a multi-GiB allocation and crash the daemon. We can't derive a
-    // tight bound from compressed_len -- zstd legitimately achieves enormous
-    // ratios on repetitive data (thousands to one) -- so we only reject values
-    // above an absolute ceiling that no legitimate Ceph payload (blob/message-
-    // sized) approaches, while still catching the pathological 4 GiB case. If
-    // the prefix is merely wrong but under the ceiling, the streaming decode
-    // below catches it via the final outbuf.pos == dst_len / frame-completion
-    // checks.
-    static constexpr uint64_t max_dst_len = 1ull << 30;  // 1 GiB
-    if ((uint64_t)dst_len > max_dst_len) {
-      return -EINVAL;
-    }
-
     ceph::buffer::ptr dstptr(dst_len);
     ZSTD_outBuffer_s outbuf;
     outbuf.dst = dstptr.c_str();
