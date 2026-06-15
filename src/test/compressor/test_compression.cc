@@ -428,6 +428,59 @@ TEST_P(CompressorTest, sharded_input_decompress)
   EXPECT_EQ(res, 0);
 }
 
+TEST_P(CompressorTest, fragmented_input_round_trip)
+{
+  // Regression guard for tracker #39525: older liblz4 produced corrupt output
+  // when compressing a *fragmented* (non-contiguous) input bufferlist, and the
+  // corruption passed BlueStore's checksum (computed over the compressed bytes)
+  // undetected. Feed the compressor a deliberately multi-segment bufferlist and
+  // assert a byte-exact round trip. The interesting boundary is around the
+  // 128 KiB min_blob_size, which is where #39525 manifested, so we straddle it.
+  std::optional<int32_t> compressor_message;
+
+  // Build the reference data first so we can compare against it.
+  std::string ref;
+  ref.reserve(200 * 1024);
+  const char *alphabet = "abcdefghijklmnopqrstuvwxyz0123456789 .";
+  for (size_t i = 0; ref.size() < 200 * 1024; ++i) {
+    // Semi-repetitive but not trivially compressible, so the encoder actually
+    // references data across fragment boundaries.
+    ref.append(alphabet + (i % 13), 1 + (i % 11));
+  }
+
+  // Slice the reference into many separately-allocated bufferptrs so the
+  // bufferlist is genuinely non-contiguous, with awkward (prime-ish) and
+  // boundary-crossing fragment sizes.
+  static const size_t frag_sizes[] = {
+    1, 7, 4096, 13, 65536 - 3, 5, 65536 + 7, 4099, 31, 17, 128 * 1024 - 1, 23,
+  };
+  bufferlist orig;
+  size_t off = 0;
+  size_t fi = 0;
+  while (off < ref.size()) {
+    size_t want = frag_sizes[fi++ % (sizeof(frag_sizes) / sizeof(frag_sizes[0]))];
+    size_t n = std::min(want, ref.size() - off);
+    bufferptr bp(n);
+    memcpy(bp.c_str(), ref.data() + off, n);
+    orig.push_back(std::move(bp));  // distinct raw buffer => stays fragmented
+    off += n;
+  }
+  // Sanity: the input really is fragmented.
+  ASSERT_GT(orig.get_num_buffers(), 1u);
+  ASSERT_FALSE(orig.is_contiguous());
+  ASSERT_EQ(orig.length(), ref.size());
+
+  bufferlist compressed;
+  int r = compressor->compress(orig, compressed, compressor_message);
+  ASSERT_EQ(0, r);
+
+  bufferlist decompressed;
+  r = compressor->decompress(compressed, decompressed, compressor_message);
+  ASSERT_EQ(0, r);
+  ASSERT_EQ(decompressed.length(), orig.length());
+  ASSERT_TRUE(decompressed.contents_equal(orig));
+}
+
 void test_compress(CompressorRef compressor, size_t size)
 {
   char* data = (char*) malloc(size);
