@@ -28,16 +28,16 @@ class ZstdCompressor : public Compressor {
   ZstdCompressor(CephContext *cct) : Compressor(COMP_ALG_ZSTD, "zstd"), cct(cct) {}
 
   int compress(const ceph::buffer::list &src, ceph::buffer::list &dst, std::optional<int32_t> &compressor_message) override {
-    ZSTD_CStream *s = ZSTD_createCStream();
-    if (!s) {
+    // RAII wrapper so every error path frees the stream (no manual frees).
+    // ZSTD_freeCStream is documented to accept NULL in case creation fails.
+    std::unique_ptr<ZSTD_CStream, decltype(&ZSTD_freeCStream)> s(
+      ZSTD_createCStream(), &ZSTD_freeCStream);
+    if (s.get() == nullptr) {
+      // It's not documented when s.get() is NULL but it can happen in the case of a malloc failure.
       return -ENOMEM;
     }
-    // RAII wrapper so every error path frees the stream (no manual frees).
-    // s is guaranteed non-null here, so the deleter never runs on NULL.
-    std::unique_ptr<ZSTD_CStream, decltype(&ZSTD_freeCStream)> s_guard(
-      s, &ZSTD_freeCStream);
 
-    size_t const res = ZSTD_initCStream_srcSize(s, cct->_conf->compressor_zstd_level, src.length());
+    size_t const res = ZSTD_initCStream_srcSize(s.get(), cct->_conf->compressor_zstd_level, src.length());
     if (ZSTD_isError(res)) {
       return -EINVAL;
     }
@@ -58,7 +58,7 @@ class ZstdCompressor : public Compressor {
       inbuf.size = p.get_ptr_and_advance(left, (const char**)&inbuf.src);
       left -= inbuf.size;
       ZSTD_EndDirective const zed = (left==0) ? ZSTD_e_end : ZSTD_e_continue;
-      size_t r = ZSTD_compressStream2(s, &outbuf, &inbuf, zed);
+      size_t r = ZSTD_compressStream2(s.get(), &outbuf, &inbuf, zed);
       if (ZSTD_isError(r)) {
 	      return -EINVAL;
       }
@@ -93,18 +93,16 @@ class ZstdCompressor : public Compressor {
     outbuf.size = dstptr.length();
     outbuf.pos = 0;
 
-    ZSTD_DStream *s = ZSTD_createDStream();
-    if (!s) {
+    // RAII wrapper so every error path frees the stream (no manual frees).
+    // ZSTD_freeDStream is documented to accept NULL in case creation fails.
+    std::unique_ptr<ZSTD_DStream, decltype(&ZSTD_freeDStream)> s(
+      ZSTD_createDStream(), &ZSTD_freeDStream);
+    if (s.get() == nullptr) {
+      // It's not documented when s.get() is NULL but it can happen in the case of a malloc failure.
       return -ENOMEM;
     }
-    // RAII wrapper so every error path (including the early p.end() return and
-    // the new error checks below) frees the DStream. s is non-null here, so
-    // the deleter never runs on NULL.
-    std::unique_ptr<ZSTD_DStream, decltype(&ZSTD_freeDStream)> s_guard(
-      s, &ZSTD_freeDStream);
 
-    size_t const init_res = ZSTD_initDStream(s);
-    if (ZSTD_isError(init_res)) {
+    if (ZSTD_isError(ZSTD_initDStream(s.get()))) {
       return -EINVAL;
     }
 
@@ -131,7 +129,7 @@ class ZstdCompressor : public Compressor {
       while (inbuf.pos < inbuf.size) {
         size_t const prev_in_pos = inbuf.pos;
         size_t const prev_out_pos = outbuf.pos;
-        r = ZSTD_decompressStream(s, &outbuf, &inbuf);
+        r = ZSTD_decompressStream(s.get(), &outbuf, &inbuf);
         if (ZSTD_isError(r)) {
           // Corrupt input, etc.
           return -EINVAL;
