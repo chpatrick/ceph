@@ -214,8 +214,11 @@ TEST(ZstdCompressor, corrupted_decompress)
 TEST(ZstdCompressor, oversized_length_prefix)
 {
   // zstd prefixes the compressed payload with a 4-byte decompressed length.
-  // A corrupt, huge prefix must not trigger a giant allocation / crash; it
-  // must be rejected with an error.
+  // A prefix larger than the real decompressed size must be rejected (the
+  // frame won't fill the buffer, so the final output length won't match)
+  // rather than returning success with the wrong length. We use a modestly
+  // oversized value (not 0xffffffff) so the test doesn't attempt a multi-GiB
+  // allocation.
   auto compressor = Compressor::create(g_ceph_context, "zstd");
   ASSERT_TRUE(compressor);
 
@@ -227,11 +230,11 @@ TEST(ZstdCompressor, oversized_length_prefix)
   ASSERT_EQ(0, r);
   ASSERT_GE(compressed.length(), 4u);
 
-  // Replace the 4-byte length prefix with 0xffffffff.
+  // Replace the 4-byte length prefix with a value well above the real size.
   bufferlist payload;
   payload.substr_of(compressed, 4, compressed.length() - 4);
   bufferlist bad;
-  ceph::encode((uint32_t)0xffffffff, bad);
+  ceph::encode((uint32_t)(orig.length() + 4096), bad);
   bad.append(payload);
 
   bufferlist decompressed;

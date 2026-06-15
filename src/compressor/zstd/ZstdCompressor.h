@@ -37,8 +37,10 @@ class ZstdCompressor : public Compressor {
       return -ENOMEM;
     }
 
-    size_t const res = ZSTD_initCStream_srcSize(s.get(), cct->_conf->compressor_zstd_level, src.length());
-    if (ZSTD_isError(res)) {
+    if (ZSTD_isError(ZSTD_CCtx_setParameter(s.get(), ZSTD_c_compressionLevel, cct->_conf->compressor_zstd_level))) {
+      return -EINVAL;
+    }
+    if (ZSTD_isError(ZSTD_CCtx_setPledgedSrcSize(s.get(), src.length()))) {
       return -EINVAL;
     }
     auto p = src.begin();
@@ -100,10 +102,6 @@ class ZstdCompressor : public Compressor {
     if (s.get() == nullptr) {
       // It's not documented when s.get() is NULL but it can happen in the case of a malloc failure.
       return -ENOMEM;
-    }
-
-    if (ZSTD_isError(ZSTD_initDStream(s.get()))) {
-      return -EINVAL;
     }
 
     // Tracks the most recent ZSTD_decompressStream return value; 0 means the
