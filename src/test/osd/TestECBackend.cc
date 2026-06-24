@@ -1287,7 +1287,17 @@ bufferlist create_buf(uint64_t len) {
   while (bl.length() < len) {
     uint64_t pages = std::rand() % 5;
     uint64_t len_to_add = std::min(len - bl.length(), pages * EC_ALIGN_SIZE);
-    bl.append_zero(len_to_add);
+    if (len_to_add == 0) {
+      continue;
+    }
+    // Use a page-aligned allocation explicitly: bufferlist::append_zero()
+    // only guarantees pointer alignment of sizeof(void*), so the resulting
+    // segments are not necessarily EC_ALIGN_SIZE (page) aligned. That holds
+    // by luck under some allocators (e.g. tcmalloc) but fails under others
+    // (e.g. glibc malloc), tripping the is_aligned() assert below.
+    bufferptr p = buffer::create_aligned(len_to_add, EC_ALIGN_SIZE);
+    p.zero();
+    bl.push_back(std::move(p));
   }
   ceph_assert(bl.is_aligned(EC_ALIGN_SIZE));
   ceph_assert(len == bl.length());
