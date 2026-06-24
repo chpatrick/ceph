@@ -167,7 +167,7 @@ TEST(ZstdCompressor, truncated_decompress)
 
   bufferlist decompressed;
   r = compressor->decompress(truncated, decompressed, compressor_message);
-  // zstd must detect the truncated frame and report an error rather than
+  // ZstdCompressor must detect the truncated frame and report an error rather than
   // silently returning success with truncated output.
   ASSERT_LT(r, 0);
 }
@@ -213,7 +213,7 @@ TEST(ZstdCompressor, corrupted_decompress)
 
 TEST(ZstdCompressor, oversized_length_prefix)
 {
-  // zstd prefixes the compressed payload with a 4-byte decompressed length.
+  // ZstdCompressor prefixes the compressed payload with a 4-byte decompressed length.
   // A prefix larger than the real decompressed size must be rejected (the
   // frame won't fill the buffer, so the final output length won't match)
   // rather than returning success with the wrong length. We use a modestly

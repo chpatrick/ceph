@@ -49,11 +49,7 @@ class ZstdCompressor : public Compressor {
     size_t left = src.length();
 
     // The on-disk format prefixes the compressed payload with the decompressed
-    // length as a uint32_t (see the ceph::encode below and the matching decode
-    // in decompress()). Reject anything that wouldn't round-trip through that
-    // field rather than silently truncating the cast and writing a bogus
-    // prefix. Callers compress blob/message-sized buffers far below this, so
-    // this only guards against a future misuse.
+    // length as a uint32_t (ceph::encode below); ensure it does not overflow.
     if (left > std::numeric_limits<uint32_t>::max()) {
       return -EFBIG;
     }
